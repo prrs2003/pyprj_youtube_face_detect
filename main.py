@@ -2,6 +2,7 @@ import yt_dlp
 import cv2
 import os
 import sys
+import numpy as np
 from datetime import datetime
 
 def log(message):
@@ -143,6 +144,85 @@ def detect_and_crop_faces(video_path, output_dir):
     log(f"   - Total de faces detectadas: {count}")
     log(f"   - Frames com faces: {faces_found_in_frame if faces_found_in_frame > 0 else 'nenhum'}")
 
+
+def _phash_image(path, hash_size=8, img_size=32):
+    """Calcula o pHash (perceptual hash) de uma imagem e retorna um array booleano.
+    Implementação usando DCT similar ao pHash clássico.
+    """
+    try:
+        img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            return None
+        img = cv2.resize(img, (img_size, img_size), interpolation=cv2.INTER_AREA)
+        img = np.float32(img)
+        dct = cv2.dct(img)
+        dct_low = dct[:hash_size, :hash_size]
+        med = np.median(dct_low)
+        hash_bits = dct_low > med
+        return hash_bits.flatten()
+    except Exception:
+        return None
+
+
+def remove_duplicate_photos(directory, similarity_threshold=0.98):
+    """Remove arquivos de imagem duplicados em `directory`.
+    Duplas com similaridade >= similarity_threshold são consideradas duplicadas.
+    """
+    log(f"🧹 Procurando fotos duplicadas em '{directory}' (limiar {similarity_threshold*100:.0f}%)...")
+    exts = ('.jpg', '.jpeg', '.png', '.bmp')
+    files = [os.path.join(directory, f) for f in sorted(os.listdir(directory)) if f.lower().endswith(exts)]
+    hashes = []  # list of (path, bits)
+    removed = 0
+    for f in files:
+        bits = _phash_image(f)
+        if bits is None:
+            log(f"   - Ignorando arquivo ilegível: {f}")
+            continue
+        is_dup = False
+        for kept_path, kept_bits in hashes:
+            # Compute hamming distance
+            dist = int(np.count_nonzero(bits != kept_bits))
+            sim = 1.0 - (dist / (bits.size))
+            if sim >= similarity_threshold:
+                try:
+                    os.remove(f)
+                    removed += 1
+                    log(f"   - Removido duplicado: {f} (similaridade {sim*100:.2f}% com {kept_path})")
+                except Exception as e:
+                    log(f"   - ERRO ao remover {f}: {e}")
+                is_dup = True
+                break
+        if not is_dup:
+            hashes.append((f, bits))
+
+    log(f"🧾 Remoção de duplicatas finalizada. Arquivos removidos: {removed}")
+
+
+def enhance_sharpness(directory, amount=1.5, sigma=1.0):
+    """Tenta melhorar a nitidez de todas as imagens no diretório usando máscara 'unsharp'.
+    `amount` controla a força (1.5 ~ leve, 2.5 mais forte).
+    """
+    log(f"✨ Melhorando nitidez das imagens em '{directory}' (força {amount}, sigma {sigma})...")
+    exts = ('.jpg', '.jpeg', '.png', '.bmp')
+    files = [os.path.join(directory, f) for f in sorted(os.listdir(directory)) if f.lower().endswith(exts)]
+    improved = 0
+    for f in files:
+        try:
+            img = cv2.imread(f)
+            if img is None:
+                log(f"   - Ignorando arquivo ilegível: {f}")
+                continue
+            blurred = cv2.GaussianBlur(img, (0, 0), sigmaX=sigma)
+            sharpened = cv2.addWeighted(img, 1.0 + amount, blurred, -amount, 0)
+            # Clip and convert
+            sharpened = np.clip(sharpened, 0, 255).astype(np.uint8)
+            cv2.imwrite(f, sharpened)
+            improved += 1
+        except Exception as e:
+            log(f"   - ERRO ao processar {f}: {e}")
+
+    log(f"✅ Nitidez processada. Imagens atualizadas: {improved}")
+
 def main():
     """Função principal para executar a detecção de faces em um vídeo do YouTube."""
     log("=" * 70)
@@ -178,6 +258,17 @@ def main():
         log("ETAPA 2: DETECÇÃO E RECORTE DE FACES")
         log("=" * 70)
         detect_and_crop_faces(video_path, output_dir)
+
+        # Etapa final: remover duplicatas e tentar melhorar nitidez
+        try:
+            remove_duplicate_photos(output_dir, similarity_threshold=0.98)
+        except Exception as e:
+            log(f"⚠️  Erro ao remover duplicatas: {e}")
+
+        try:
+            enhance_sharpness(output_dir, amount=1.5, sigma=1.0)
+        except Exception as e:
+            log(f"⚠️  Erro ao melhorar nitidez: {e}")
         
         log("\n" + "=" * 70)
         log("🎉 OPERAÇÃO CONCLUÍDA COM SUCESSO!")
