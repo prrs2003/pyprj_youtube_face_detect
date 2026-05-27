@@ -96,7 +96,7 @@ def detect_and_crop_faces(video_path, output_dir):
             progress_percent = (frames_processed / total_frames * 100) if total_frames > 0 else 0
             log(f"📈 Progresso: {frames_processed}/{total_frames} frames ({progress_percent:.1f}%) - Faces encontradas: {count}")
             last_progress_frames = frames_processed
-        ######
+        ########
         # Resize the frame
         resized_frame = cv2.resize(frame, None, fx=scale_factor, fy=scale_factor, interpolation=cv2.INTER_AREA)
 
