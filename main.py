@@ -48,12 +48,25 @@ def download_youtube_video(url, output_path):
 
 def detect_and_crop_faces(video_path, output_dir):
     """Detecta faces em um vídeo e as recorta para arquivos JPEG."""
-    log("🔍 Carregando classificador de faces Haar Cascade...")
+    log("🔍 Carregando classificadores Haar Cascade (frontal, perfil, upperbody)...")
     face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+    profile_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_profileface.xml')
+    upperbody_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_upperbody.xml')
+
     if face_cascade.empty():
-        log("❌ ERRO: Impossível carregar o arquivo classificador Haar Cascade")
+        log("❌ ERRO: Impossível carregar o classificador frontal")
         raise IOError('Unable to load the face cascade classifier xml file')
-    log("✅ Classificador de faces carregado com sucesso")
+    log("✅ Classificador frontal carregado com sucesso")
+    if profile_cascade.empty():
+        log("⚠️  Aviso: classificador de perfil não carregado (pode não existir)")
+        profile_cascade = None
+    else:
+        log("✅ Classificador de perfil carregado")
+    if upperbody_cascade.empty():
+        log("⚠️  Aviso: classificador upperbody não carregado (pode não existir)")
+        upperbody_cascade = None
+    else:
+        log("✅ Classificador upperbody carregado")
 
     log(f"🎬 Abrindo arquivo de vídeo: {video_path}")
     video_capture = cv2.VideoCapture(video_path)
@@ -98,42 +111,64 @@ def detect_and_crop_faces(video_path, output_dir):
             log(f"📈 Progresso: {frames_processed}/{total_frames} frames ({progress_percent:.1f}%) - Faces encontradas: {count}")
             last_progress_frames = frames_processed
         ########
-        # Resize the frame
+        # Resize the frame for faster detection
         resized_frame = cv2.resize(frame, None, fx=scale_factor, fy=scale_factor, interpolation=cv2.INTER_AREA)
 
         gray = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2GRAY)
 
+        # Primeiro tente detector frontal
         faces = face_cascade.detectMultiScale(gray, 1.1, 4)
-        
+        detector_used = 'frontal'
+
+        # Se nada for encontrado, tente perfil e depois upperbody
+        if len(faces) == 0 and profile_cascade is not None:
+            faces = profile_cascade.detectMultiScale(gray, 1.1, 4)
+            if len(faces) > 0:
+                detector_used = 'profile'
+
+        if len(faces) == 0 and upperbody_cascade is not None:
+            faces = upperbody_cascade.detectMultiScale(gray, 1.05, 3)
+            if len(faces) > 0:
+                detector_used = 'upperbody'
+
         faces_in_frame = len(faces)
         if faces_in_frame > 0:
             faces_found_in_frame += faces_in_frame
 
-        # Draw a rectangle around the faces
+        # Process each detected box and expand it to include most of the head
         for (x, y, w, h) in faces:
-            # Scale the coordinates back to the original image
+            # Scale coordinates back to original frame size
             x, y, w, h = int(x / scale_factor), int(y / scale_factor), int(w / scale_factor), int(h / scale_factor)
-            
-            # Increase the size of the square
-            padding_x = int(w * 0.10)
-            padding_y = int(h * 0.10)
+
+            # Default padding aims to include forehead, hair and part of the sides
+            padding_x = int(w * 0.35)
+            padding_y = int(h * 0.8)
+
+            # If detector returned upperbody, adjust to take top portion as head
+            if detector_used == 'upperbody':
+                # Use the top ~60% of the upperbody box as the head region
+                h = int(h * 0.6)
+                padding_x = int(w * 0.25)
+                padding_y = int(h * 0.6)
+
+            # Expand box (move up/left and grow width/height)
             x -= padding_x
             y -= padding_y
             w += 2 * padding_x
             h += 2 * padding_y
-            
-            # Prevent the square from going off screen
+
+            # Clamp to frame boundaries
             x = max(0, x)
             y = max(0, y)
             w = min(frame_width - x, w)
             h = min(frame_height - y, h)
 
-            face_image = frame[y:y+h, x:x+w]
-            if face_image.size != 0:
+            head_image = frame[y:y+h, x:x+w]
+            if head_image.size != 0:
                 face_file = os.path.join(output_dir, f'face_{count}.jpg')
-                cv2.imwrite(face_file, face_image)
+                cv2.imwrite(face_file, head_image)
                 count += 1
-#####
+#
     # When everything is done, release the capture
     video_capture.release()
     cv2.destroyAllWindows()
