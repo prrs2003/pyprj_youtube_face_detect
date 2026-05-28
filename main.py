@@ -10,7 +10,7 @@ def log(message):
     timestamp = datetime.now().strftime("%H:%M:%S")
     print(f"[{timestamp}] {message}")
     sys.stdout.flush()
-
+##
 def download_youtube_video(url, output_path):
     """Baixa um vídeo do YouTube usando yt-dlp."""
     log("🔗 Conectando ao YouTube e obtendo informações do vídeo...")
