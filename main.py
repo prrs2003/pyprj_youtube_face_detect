@@ -133,7 +133,7 @@ def detect_and_crop_faces(video_path, output_dir):
                 face_file = os.path.join(output_dir, f'face_{count}.jpg')
                 cv2.imwrite(face_file, face_image)
                 count += 1
-
+#####
     # When everything is done, release the capture
     video_capture.release()
     cv2.destroyAllWindows()
